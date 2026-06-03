@@ -32,7 +32,17 @@ A header-only C++ re-implementation of the core ideas behind Triton's **FPSan**
 floating-point sanitizer, restricted to `float32`. This lets you toy with
 FPSan-rewritten programs by hand without running the Triton compiler.
 
-- `fpsan_f32.hpp` — the `FPSanF32` class and the embedding `phi`.
+> ### 📖 Best place to start: [**NARROW_FLOATS.md**](NARROW_FLOATS.md)
+>
+> Want to actually *understand* how FPSan works, not just run it? Read
+> **[NARROW_FLOATS.md](NARROW_FLOATS.md)** — an illustrated walk-through that
+> applies the exact same recipe to **FP4** (only 16 values, so the entire
+> embedding fits in one table you can check by eye) and **FP8 E5M2** (a real
+> IEEE-style type with Inf/NaN). It computes the embedding `φ` by hand and
+> verifies every algebraic law. It is the most accessible explanation here.
+
+- `fpsan_f32.hpp` — the `FPSanF32` class and the embedding `phi`. **This is the
+  primary code**: one concrete type, nothing to configure.
 - `demo.cpp` — toy examples confirming the properties the blog post claims.
 
 Requires **C++20** (uses `std::bit_cast`). Just invoke your compiler directly:
@@ -89,3 +99,19 @@ produces.
 - `x / x == 1` holds only for **odd** payloads; for even payloads `inv` is a
   parity-preserving involution, not a true inverse (the demo shows one of each).
 - FPSan results are only meaningful when compared against *other* FPSan results.
+
+## The narrow-float study material
+
+The code behind [NARROW_FLOATS.md](NARROW_FLOATS.md). `fpsan_f32.hpp` stays the
+primary code; these are supporting study files:
+
+- `fpsan_generic.hpp` — a small, run-time-parameterized companion (`FPFormat` +
+  `FPSanFloat`) that applies the same recipe to any narrow format. Deliberately
+  plain, not a template framework; it exists to produce the document's tables.
+- `narrow_demo.cpp` — enumerates FP4 and FP8 exhaustively, prints every table in
+  the document, and verifies the properties (it also cross-checks that the
+  generic path reproduces `fpsan_f32.hpp`'s payloads bit-for-bit):
+
+  ```
+  c++ -std=c++20 -O2 narrow_demo.cpp -o narrow_demo && ./narrow_demo
+  ```
