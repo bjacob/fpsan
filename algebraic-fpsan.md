@@ -58,7 +58,11 @@ expressions with the same exact value get the same residue — automatically, fo
 **every** identity true over $\mathbb{Q}$, not just the ones we thought to build
 in. That is strictly more than FPSan's free model honors.
 
-Choose $p$ slightly below $2^{32}$ (or see §5 on $2^{61}-1$).
+We restrict attention to **compact 32-bit encodings** throughout. Two variants
+are developed in §8: a single prime $p$ just below $2^{32}$, and a composite
+$n=pd$ (still $<2^{32}$) that buys an exact exponential. A working prototype of
+both lives in [`algebraic_fpsan_generic.hpp`](algebraic_fpsan_generic.hpp) +
+[`algebraic_demo.cpp`](algebraic_demo.cpp).
 
 ## 2. The central dichotomy: free model vs. value model
 
@@ -97,11 +101,13 @@ We give up injectivity ($p < 2^{32}$). Three separate questions hide under
 "how bad are collisions."
 
 **(a) Collision with zero — the one that would hurt — does not happen.**
-$\varphi_p(m\cdot 2^e)=0 \iff p\mid m \iff m=0$, because $|m|<2^{24} < p$. So,
-provided $p>2^{24}$, the *only* finite float with residue $0$ is $\pm 0.0$. This
-is the crucial design constraint: it keeps $0$ honest, which is what makes
-division and the zero/infinity story (§7) clean. Nothing nonzero ever silently
-becomes zero.
+$\varphi_n(m\cdot 2^e)=0 \iff n\mid m \iff m=0$, because $|m|<2^{24}$ and the
+modulus $n>2^{24}$ (both variants: $n\approx 2^{32}$ for 1b, $\approx 2^{31}$ for
+CRT). So the *only* finite float with residue $0$ is $\pm 0.0$ — the crucial
+design constraint that keeps $0$ honest and the zero/infinity story (§7) clean.
+Nothing nonzero ever silently becomes zero. (This is about residue-$0$; the CRT
+variant separately has nonzero *zero-divisors* — §6, §8 — a distinct,
+division-only issue.)
 
 **(b) Leaf collisions (two distinct floats, same residue) are common but
 mostly harmless.** With $N\approx 2^{32}$ finite floats dropped into $p\approx
@@ -126,17 +132,24 @@ This is exactly Freivalds / Schwartz–Zippel / Rabin-fingerprint territory:
 checking an identity by evaluating at a random point (here, reducing mod a
 random prime). Consequences:
 
-- Per comparison, false-match $\approx 2^{-24}$ with a 32-bit prime — a few bits
-  weaker than FPSan's $\approx 2^{-32}$, but **tunable**: a 64-bit prime gives
-  $\approx 2^{-53}$; $k$ independent primes (CRT) multiply the rates.
+- Per comparison, false-match $\approx 2^{-24}$ to $2^{-32}$ with a 32-bit
+  modulus. Staying compact (32-bit), the lever for more margin is **repetition**:
+  $k$ runs with $k$ different primes multiply the rates (independent
+  fingerprints / CRT). Two runs $\approx 2^{-48}$–$2^{-64}$. The sanitizer is a
+  test tool, so spending *time* (extra runs) rather than *space* (a wider word)
+  is the right trade — and it keeps the instrumented program's footprint
+  unchanged (§8).
 - Unlike FPSan's *fixed* scramble — which has a fixed set of colliding pairs that
   collide on every run — randomizing $p$ makes collisions **non-repeatable and
-  adversarially robust**: there is no bad pair that always fools you. This is a
-  real qualitative gain in the randomized regime.
+  adversarially robust**: there is no bad pair that always fools you.
+
+The prototype confirms the rate: over 300k distinct random floats, observed leaf
+collisions track $\binom{N}{2}/n$ to within noise (16 vs ~10.5 at $n\approx2^{32}$,
+21 vs ~21.1 at $n\approx2^{31}$).
 
 Verdict: the loss of injectivity is essentially cosmetic for the intended use.
 The substantive cost is a slightly higher per-prime collision rate, bought back
-with a bigger or repeated prime.
+by repeating with another prime.
 
 ## 4. Scrambling: a hard trade-off, not a dial
 
@@ -166,13 +179,14 @@ avalanche is nicer.
 This is where $\varphi_p$ shines.
 
 - **$+,-,\times$:** exact homomorphic images; every ring identity holds for free.
-- **$\div$:** $\mathbb{F}_p$ is a field, so division is **total except by
-  residue $0$**, and $x/x = 1$ holds **always** (any $x$ with nonzero residue —
-  i.e. any nonzero float, by §3a). Compare FPSan, whose $\mathbb{Z}/2^{w}$ has
-  zero-divisors and only a *parity-preserving involution* for "inverse":
-  $x/x=1$ there holds only for odd payloads. The field is a clean win.
-  Division by residue $0$ occurs iff dividing by a genuine $\pm 0.0$ → honest
-  infinity (§7).
+- **$\div$:** when the modulus is **prime** (variant 1b), $\mathbb{F}_p$ is a
+  field, so division is **total except by residue $0$**, and $x/x = 1$ holds
+  **always** (any $x$ with nonzero residue — i.e. any nonzero float, by §3a).
+  Compare FPSan, whose $\mathbb{Z}/2^{w}$ has zero-divisors and only a
+  *parity-preserving involution* for "inverse": $x/x=1$ there holds only for odd
+  payloads. The field is a clean win. Division by residue $0$ occurs iff
+  dividing by a genuine $\pm 0.0$ → honest infinity (§7). (The composite CRT
+  variant gives this up for a small zero-divisor rate — §8.)
 - **Casts / mixed precision:** all of `f16, bf16, f32, f64` embed in
   $\mathbb{Z}[1/2]$ via the *same* $\varphi_p$. A value-preserving cast
   (widening, or any exact narrowing) does not change the rational value, so it is
@@ -189,64 +203,65 @@ What is **lost**, and it is fundamental: **order, magnitude, `abs`,
 `min`/`max`, comparisons.** $\mathbb{F}_p$ is not an ordered field; the residue
 discards size and sign-as-order entirely. FPSan loses order too (its $\varphi$
 is a hash), so this is not a differentiator, but here it is *structural*: there
-is no ordered-field quotient to hope for. Comparisons need a side channel (carry
-the actual float alongside, or tag) — same as FPSan.
+is no ordered-field quotient to hope for. A reduction like `max(x₁,…,xₙ)` is
+simply **not representable** (it needs the total order); FPSan "solves" min/max
+by imposing an order on the *scrambled payload* — associative and
+reassociation-invariant, but value-*infaithful* (it may select the wrong
+element). For us, min/max/`abs`/comparisons are **out of scope**: they need a
+side channel (carry the actual float, or tag).
 
-**Cost.** Mod-$p$ arithmetic is costlier than FPSan's free mod-$2^{w}$
-wraparound (a reduction per op). Mitigation: a pseudo-Mersenne or Mersenne prime
-for cheap reduction. $p = 2^{61}-1$ is a sweet spot — prime, fits in 64 bits,
-trivial reduction, collision $\approx 2^{-53}$, and $2$ has large order so the
-$\bar2^{\,e}$ are well spread. (A *fixed* prime forfeits the adversarial
-robustness of §3c; use a random prime when that matters.)
+**Cost.** Mod-$n$ arithmetic is costlier than FPSan's free mod-$2^{w}$
+wraparound (a reduction per op). With a 32-bit modulus the reduction is a single
+multiply-high (Barrett/Montgomery); a pseudo-Mersenne $p$ makes it a couple of
+adds. We stay 32-bit on purpose (§8): footprint fidelity matters more than the
+per-op cost for a sanitizer.
 
-## 6. Transcendentals: where the prime field bites
+## 6. Transcendentals: exp is recoverable (CRT); the rest stay free
 
 `exp, log, sin, cos, sqrt, …` are not rational functions, so the homomorphism
-says nothing: $\varphi_p(\exp x)$ has no relation to $\exp(\varphi_p x)$
-($\exp$ isn't even defined on $\mathbb{F}_p$). The question is whether we can
-*build* an `exp` on residues with the right identity, the way FPSan builds
-$\exp(p)=g^{p}$ to get $\exp(a{+}b)=\exp(a)\exp(b)$.
+says nothing directly. The question is whether we can *build* an `exp` with the
+right identity $\exp(a{+}b)=\exp(a)\exp(b)$, the way FPSan builds $g^{p}$.
 
-**In a prime field, we cannot.** Such an `exp` would be a homomorphism
-$(\mathbb{F}_p,+)\to(\mathbb{F}_p^\times,\times)$, i.e. from a group of order
-$p$ to one of order $p-1$. Since $\gcd(p,\,p-1)=1$, the only such homomorphism is
-**trivial**. So the single most useful transcendental identity — the one FPSan
-gets — is *unavailable* here. FPSan's trick works precisely because it lives in
-$\mathbb{Z}/2^{w}$, where the additive group (order $2^{w}$) and the unit group
-(order $2^{w-1}$) share the prime $2$, so $g^{p}$ is a nontrivial homomorphism.
-The prime field's coprimality is exactly what forbids it.
+**As a function of the mod-$p$ residue, no.** Such an `exp` would be a
+homomorphism $(\mathbb{F}_p,+)\to(\mathbb{F}_p^\times,\times)$; since
+$\gcd(p,\,p-1)=1$ the only one is trivial. So **variant 1b** (single prime)
+cannot honor the exponential law — its `exp` is just a tagged hash token, and
+the prototype duly finds the law holding $0/50000$ times (i.e. never). FPSan
+escapes this only because $\mathbb{Z}/2^{w}$'s additive and unit groups share
+the prime $2$.
 
-Partial escapes:
+**As a function of a second, mod-$d$ residue, yes.** The value-level map
+$\exp:(\mathbb{Z}[1/2],+)\to(\mathbb{F}_p^\times,\times)$ *does* exist: pick $g$
+of **odd order** $d$, set $\exp(1)=g$; the odd-order $2^{n}$-th roots are unique,
+giving the closed form $\exp(v)=g^{\,v\bmod d}$, which satisfies the law exactly.
+The catch: it depends on $v\bmod d$, **not** $v\bmod p$ — it does not factor
+through the mod-$p$ residue (else $h(pw)=h(w)^{p}=h(w)$ forces triviality). So we
+must *carry* $v\bmod d$.
 
-- **$\mathbb{Z}/p^2$** (still a homomorphic image of $\mathbb{Z}[1/2]$): the
-  principal units $1+p\mathbb{Z}/p^2$ form a cyclic group of order $p$, so
-  $\exp(r)=(1+p)^{r}$ *is* a nontrivial additive→multiplicative homomorphism.
-  But it has period $p$ (kernel of order $p$), so it is wildly non-injective, and
-  $\mathbb{Z}/p^2$ is no longer a field (we lose §5's clean division). A real
-  trade.
-- More generally, only $\mathbb{Z}/n\mathbb{Z}$ with $\gcd(n,\varphi_{\text{Euler}}(n))>1$
-  supports a nontrivial exp; primes are the worst case for this and the best case
-  for division. Tension.
+**CRT keeps this compact (variant CRT).** Carrying $(v\bmod p,\,v\bmod d)$ is, by
+CRT, carrying $v\bmod n$ with $n=pd$ — one residue, one 32-bit word. With
+$p\equiv1\pmod d$ and $g$ of order $d$ in $(\mathbb{Z}/n)^\times$, the exponent
+$v\bmod d = r\bmod d$ is read straight off the single residue, and
+$\exp(v)=g^{\,r\bmod d}$. The prototype's CRT variant honors
+$\exp(a{+}b)=\exp(a)\exp(b)$ **exactly** ($50000/50000$). So honoring exp costs
+neither footprint nor a second word — it costs (see §8): a *composite* modulus,
+hence zero-divisors at rate $\sim 1/p+1/d$ (observed $19/300\mathrm{k}$), and an
+`exp` whose image is only the order-$d$ subgroup, so exp results collide at
+$\sim 1/d$ (observed: 300k inputs → only $\approx d$ distinct exp outputs).
 
-Now the **conceptual payoff**, which I think is the most interesting point in
-these notes. By Lindemann–Weierstrass / Schanuel, the values of $\exp$ (and the
-other transcendentals) at distinct algebraic arguments are **algebraically
-independent**. So the *faithful* value model for the transcendental fragment is
-the one in which each transcendental result is a **fresh, free generator** —
-which is exactly the *free* model, i.e. exactly what FPSan's scramble produces!
+`sin`/`cos` get the analogous order-$d$ rotation (the Euler construction).
+`log`, `sqrt`, `erf`, … have no usable identity — a faithful `log` would be
+$\exp$'s inverse, the discrete logarithm, which is expensive and again not a
+function of the residue — so they stay **hash tokens**. And that is *correct*,
+not a fallback: by Lindemann–Weierstrass / Schanuel, transcendental values at
+distinct algebraic arguments are **algebraically independent**, so a fresh free
+generator per call is the faithful model.
 
-So the dichotomy of §2 resolves with a clean division of labour:
-
-| fragment | true values | faithful model |
+| fragment | true-value structure | model here |
 |---|---|---|
-| algebraic ($+,-,\times,\div$, rational fns) | richly related ($2+2=4$) | **value** ($\varphi_p$) |
-| transcendental ($\exp,\log,\sin,\dots$) | algebraically independent | **free** (FPSan scramble) |
-
-FPSan applies the free model everywhere (paying for it on the algebraic part by
-over-discriminating: $2{+}2\neq4$). The pure-$\varphi_p$ system would apply the
-value model everywhere (paying for it on the transcendental part by having no
-honest construction at all, *worse* than FPSan there). The right object uses each
-where it is faithful.
+| algebraic ($+,-,\times,\div$) | richly related ($2{+}2=4$) | **value**: $\varphi_n$ residue |
+| $\exp$ (and $\sin,\cos$) | one relation: $\exp(a{+}b)=\exp(a)\exp(b)$ | **structured**: $g^{\,v\bmod d}$ (CRT only) |
+| $\log,\sqrt,\dots$ | algebraically independent | **free**: hash token |
 
 ## 7. Zero, infinity, NaN, signs
 
@@ -260,57 +275,85 @@ $$\widehat{\mathbb{F}_p} \;=\; \mathbb{P}^1(\mathbb{F}_p)\ \sqcup\ \{\mathrm{NaN
   $\pm\infty \mapsto \infty$;  NaN $\mapsto$ NaN.
 - $\mathbb{P}^1(\mathbb{F}_p)$ gives $x/0=\infty$ for $x\neq 0$ for free, and the
   Möbius/IEEE-shaped rules $\infty+\text{finite}=\infty$, $\infty\cdot x=\infty$
-  ($x\neq0$). NaN is absorbing, and seeds the genuinely-undefined forms
-  $\infty-\infty,\ 0\cdot\infty,\ 0/0,\ \infty/\infty \mapsto \mathrm{NaN}$,
-  matching IEEE's structure.
+  ($x\neq0$). NaN is absorbing, and seeds the indeterminate forms
+  $\infty+\infty,\ \infty-\infty,\ 0\cdot\infty,\ 0/0,\ \infty/\infty \mapsto
+  \mathrm{NaN}$. With *unsigned* $\infty$, even $\infty+\infty$ is indeterminate
+  — IEEE resolves it via the sign we dropped — so the model emits NaN slightly
+  more freely than IEEE, but only at the already-non-finite fringe.
 
 The §3a fact ($0$ is hit only by true zero) is what makes this principled:
 $1/x=\infty$ exactly when $x$ is a genuine zero, never because some nonzero float
 collided onto $0$. So $0$ and $\infty$ are honest. This is a **better** Inf/NaN
 story than FPSan, which models none of it.
 
-Caveats, both minor and both about signs the residue can't see:
+Not modeled (out of scope — these compact variants carry no sign bits):
 
-- **Signed zero** is lost ($+0.0,-0.0\mapsto 0$); $\mathbb{F}_p$ has one zero.
-- **Signed infinity** is lost ($\pm\infty\mapsto$ one $\infty$); $\mathbb{P}^1$
-  has one point at infinity. (Negation $\varphi_p(-v)=-\varphi_p(v)$ works
-  perfectly on *finite* values — sign of finite numbers is fine; it is only the
-  $\pm0$ and $\pm\infty$ poles that merge.) If a use case needs them, carry a
-  sign bit beside the residue.
+- **Signed zero / signed infinity.** $+0.0,-0.0\mapsto 0$ and $\pm\infty\mapsto$
+  one $\infty$; $\mathbb{F}_p$ has one zero, $\mathbb{P}^1$ one pole. (Negation
+  $\varphi_n(-v)=-\varphi_n(v)$ is exact on *finite* values — only the $\pm0$ and
+  $\pm\infty$ poles merge.)
+- **(CRT variant)** division by a nonzero *zero-divisor* poisons to NaN, not
+  $\infty$ — a units issue (§8), separate from the honest $1/0=\infty$.
 
-## 8. Synthesis: the hybrid worth building
+## 8. The two compact variants
 
-The pieces compose into one design:
+Everything above instantiates as one of two 32-bit designs. Both carry a single
+residue plus the projective+NaN extension of §7; they differ only in the modulus.
 
-> Carry a residue $r=\varphi_p(\text{exact value})\in\widehat{\mathbb{F}_p}$.
-> Do $+,-,\times,\div$ and casts as field/projective operations — exact,
-> total, value-faithful, precision-agnostic, with honest $0/\infty/$NaN.
-> At each transcendental call $f(x)$, where no rational residue exists, mint a
-> **fresh free generator**: a value $t$ determined deterministically by
-> $(f, r_x)$ (a keyed scramble / lookup, as FPSan does for its tagged ops), and
-> continue algebraically with $t$. This is faithful because transcendental
-> outputs *are* free (§6).
+**Variant 1b — single prime.** $n=p$ just below $2^{32}$ (the prototype uses
+$2^{32}-5$). $\mathbb{Z}/n=\mathbb{F}_p$ is a **field**: division total, $x/x=1$
+always, no zero-divisors; cleanest algebra and best collision margin
+($\sim2^{-32}$). No exponential law — `exp` and all transcendentals are hash
+tokens.
 
-This dominates both parents: the algebraic core gets $\varphi_p$'s superior
-properties (field division, unified mixed precision, true value-equivalence,
-clean Inf/NaN); the transcendental parts get FPSan-style freeness, which is the
-correct model there.
+**Variant CRT — composite $n=pd$.** $p,d$ distinct odd primes, $p\equiv1\pmod d$,
+$n<2^{32}$ (prototype: a Sophie-Germain pair near $2^{15}$, $n\approx2^{31}$).
+$\mathbb{Z}/n\cong\mathbb{F}_p\times\mathbb{F}_d$ — a product of fields, *not* a
+field. Buys the **exact exp homomorphism** $\exp(v)=g^{\,v\bmod d}$ (§6). Costs:
 
-Genuinely open design questions:
+- **zero-divisors** at rate $\sim 1/p+1/d$: division by one is undefined and
+  poisons to NaN ($x/x\ne1$ there). Observed $19/300\mathrm{k}$.
+- **exp collisions** at $\sim 1/d$: `exp`'s image is only the order-$d$ subgroup.
+  Observed: 300k inputs → $\approx d$ distinct exp outputs.
+- a slightly smaller algebraic modulus → marginally more leaf collisions.
 
-1. **Honoring $\exp(a{+}b)=\exp(a)\exp(b)$ in the hybrid.** A fresh generator
-   for each $\exp$ call forgets this one true relation among $\exp$-values.
-   Recovering it requires stepping outside $\mathbb{F}_p$ — e.g. a side channel
-   in the order-$p$ part of $(\mathbb{Z}/p^2)^\times$ (§6), or carrying an extra
-   "exponent" coordinate. Is there a clean structure that is a field for the
-   algebraic part *and* carries the one exponential relation? (Schanuel says
-   that relation, plus its angle-addition cousins for $\sin/\cos$, is essentially
-   *all* the structure there is — so this is a bounded amount to capture.)
-2. **Comparisons / order / `abs`.** Unavoidably a side channel; how cheaply?
-3. **Rounding.** Like FPSan, the model abstracts rounding entirely (§9). Is there
-   any value-faithful way to make rounding visible without leaving the algebraic
-   world? (Likely no — rounding is not algebraic — but worth stating as the
-   boundary of the approach.)
+Prefer $n=pd$ (two distinct primes — a product of fields) over $\mathbb{Z}/p^2$:
+same exp trick (via the order-$p$ principal units) but with **nilpotents**, which
+are algebraically uglier and less value-faithful.
+
+| | variant 1b (prime) | variant CRT ($pd$) |
+|---|---|---|
+| modulus | $p\approx2^{32}$ | $n=pd\approx2^{31}$ |
+| algebra | field; division total, $x/x=1$ | product of fields; zero-divisors $\sim1/p{+}1/d$ |
+| $\exp(a{+}b)=\exp(a)\exp(b)$ | ✗ (hash token) | ✓ ($g^{\,v\bmod d}$) |
+| exp collisions | — | $\sim 1/d$ |
+| leaf collisions | $\sim2^{-32}$ | $\sim2^{-31}$ |
+
+Both share the **hybrid transcendental scheme**: carry $\varphi_n(\text{exact
+value})$ for $+,-,\times,\div$ and casts (exact, value-faithful,
+precision-agnostic, honest $0/\infty/$NaN); at a transcendental call, either
+apply the structured map ($\exp$, and $\sin/\cos$, in the CRT variant) or mint a
+fresh free generator $t=H(f,r_x)$ (`log`, `sqrt`, … — and *all* transcendentals
+in 1b). Faithful by §6.
+
+A prototype of both — [`algebraic_fpsan_generic.hpp`](algebraic_fpsan_generic.hpp)
+and [`algebraic_demo.cpp`](algebraic_demo.cpp) — passes the ring-homomorphism,
+ring-law, Inf/NaN, and (CRT) exp-homomorphism checks and reports the
+collision / zero-divisor / exp-image statistics quoted above.
+
+### Resolved and remaining
+
+- **$\exp(a{+}b)=\exp(a)\exp(b)$ — resolved.** The worry that the prime field
+  forbids it was about exp *as a function of the mod-$p$ residue*; carrying the
+  mod-$d$ residue (folded in by CRT) delivers it exactly, at the costs tabled
+  above. Extra collision margin, if needed, comes from **repeating with different
+  prime pairs** (time, not space — §3).
+- **Order / `min`/`max` / `abs` / comparisons — open, and fundamental.**
+  $\mathbb{F}_p$ is unordered; no sign or exponent trick recovers a total order.
+  This is the real limitation of the approach, shared with FPSan (which fakes it
+  with payload-order, sacrificing value-faithfulness). A side channel (the actual
+  float, or a tag) is the only route.
+- **Rounding — out of scope by design (§9).**
 
 ## 9. A note on rounding (shared boundary with FPSan)
 
@@ -319,32 +362,41 @@ these the same up to exact algebra?" and are deliberately **invariant to
 reassociation and to rounding-order**. The sanitizer flags rewrites that change
 the *exact* value, not ones that merely reround. This is a feature (it is what
 lets a reduction in two orders compare equal), and it is the same boundary FPSan
-draws. $\varphi_p$ does not change it.
+draws. $\varphi_n$ does not change it.
+
+A corollary worth stating, since it surprises: **overflow to $\infty$ is not
+modeled.** The model is exact and carries no magnitude ($\mathbb{F}_p$ is
+unordered), so a sum of finite values is always a finite residue — never
+$\infty$. The *only* source of $\infty$ is division by a true zero. Thus
+`1/(sum of huge values)` is an ordinary finite inverse here, where IEEE would
+overflow to $\infty$ and then give $0$; both behaviors are deliberate
+consequences of abstracting rounding and magnitude away.
 
 ## 10. Scorecard vs. FPSan
 
-| property | FPSan ($\mathbb{Z}/2^{w}$, scrambled) | $\varphi_p$ ($\mathbb{Z}[1/2]\to\mathbb{F}_p$) |
-|---|---|---|
-| encoding is a ring homomorphism | no (free model) | **yes (value model)** |
-| respects all rational-function identities | no (only axioms) | **yes** |
-| $x/x=1$, division total | partial (odd only) | **yes (field)** |
-| mixed precision / casts | per-width $\varphi_w$, resize | **one map, exact casts = id** |
-| subnormals | punted | **uniform** |
-| Inf / NaN | not modeled | **$\mathbb{P}^1\sqcup\{$NaN$\}$, honest $0$** |
-| $\exp(a{+}b)=\exp(a)\exp(b)$ | **yes ($g^{p}$)** | no (prime-field obstruction) |
-| transcendentals | tagged scramble (faithful: free) | needs the same fallback |
-| order / `abs` / compare | lost | lost (structural) |
-| injectivity | bijection | $\sim$ injective; $0$ safe; tunable collisions |
-| randomization | fixed scramble (fixed bad pairs) | **random prime (no fixed bad pairs)** |
-| collision rate / comparison | $\sim 2^{-w}$ | $\sim 2^{-24}$ (32-bit) … $2^{-53}$ ($2^{61}{-}1$) |
-| per-op cost | free wraparound | mod-$p$ reduction (Mersenne helps) |
+| property | FPSan ($\mathbb{Z}/2^{w}$, scrambled) | variant 1b (prime) | variant CRT ($pd$) |
+|---|---|---|---|
+| encoding is a ring homomorphism | no (free model) | **yes (value)** | **yes (value)** |
+| respects all rational-function identities | no (only axioms) | **yes** | **yes** |
+| $x/x=1$, division total | partial (odd only) | **yes (field)** | mostly (zero-div $\sim1/p{+}1/d\to$NaN) |
+| mixed precision / casts | per-width $\varphi_w$, resize | **one map, exact casts = id** | **one map, exact casts = id** |
+| subnormals | punted | **uniform** | **uniform** |
+| Inf / NaN | not modeled | **$\mathbb{P}^1\sqcup\{$NaN$\}$, honest $0$** | **$\mathbb{P}^1\sqcup\{$NaN$\}$, honest $0$** |
+| $\exp(a{+}b)=\exp(a)\exp(b)$ | yes ($g^{p}$) | no (hash token) | **yes ($g^{\,v\bmod d}$)** |
+| other transcendentals | tagged scramble (free) | hash token (free) | hash token (free) |
+| order / `abs` / `min` / `max` | faked (payload-order, infaithful) | out of scope | out of scope |
+| footprint | 32-bit | 32-bit | 32-bit |
+| leaf-collision rate | $\sim2^{-w}$ | $\sim2^{-32}$ | $\sim2^{-31}$ |
+| exp-collision rate | $\sim2^{-w}$ | — (no exp) | $\sim1/d\;(\approx2^{-15})$ |
+| randomization | fixed scramble (fixed bad pairs) | **random prime** | **random prime pair** |
+| per-op cost | free wraparound | mod-$p$ reduction | mod-$n$ reduction |
 
-**Bottom line.** The residue homomorphism is a strictly better foundation for
-the *algebraic* fragment of float programs — it is the honest value model, it
-makes division and mixed precision clean, and it gives a principled Inf/NaN
-story — at the cost of mod-$p$ arithmetic and a few bits of collision margin
-(recoverable). It is *not* a drop-in win, because the prime field structurally
-forbids FPSan's one genuinely-nice transcendental trick. The synthesis in §8 —
-$\varphi_p$ for algebra, free generators for transcendentals — is the design
-these notes point to, and the open question in §8.1 is the crux of whether it
-can also keep the exponential law.
+**Bottom line.** On the *algebraic* fragment both variants are a strictly better
+foundation than FPSan — the honest value model, clean division and mixed
+precision, a principled Inf/NaN story — at the cost of mod-$n$ arithmetic and a
+few bits of collision margin (bought back by repeating with another prime).
+**Variant 1b** is the clean field: pick it when the exponential law isn't needed.
+**Variant CRT** adds the exact exp homomorphism (and $\sin/\cos$), paying with
+zero-divisors and a small exp image. The genuine remaining limitation, shared
+with FPSan and not fixable by any sign/exponent trick, is **order / `min` /
+`max`** — a finite field has no compatible order.
