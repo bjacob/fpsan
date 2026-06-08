@@ -21,7 +21,7 @@
 // nothing to configure.  This file applies the EXACT same FPSan recipe to an
 // arbitrary low-precision floating-point format chosen at run time, so we can
 // study the integer payloads on tiny types -- in particular FP4 (E2M1), whose
-// 16 values can be tabulated and checked by hand.  See NARROW_FLOATS.md.
+// 16 values can be tabulated and checked by hand.  See narrow-floats.md.
 //
 // This is intentionally a plain run-time-parameterized class, not a template
 // metaprogramming framework: a `FPFormat` describes the bit layout, and a

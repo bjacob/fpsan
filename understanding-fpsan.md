@@ -11,7 +11,8 @@ post](https://cp4space.hatsya.com/2026/05/03/schanuels-conjecture-and-the-semant
 by one of its authors covering the math. The present document is our own
 attempt to understand the design by deriving it from scratch, motivated
 entirely by concrete numerical-engineering needs and front-loading as little
-mathematical machinery as possible.
+mathematical machinery as possible. A real, complete implementation of these
+ideas lives at [ROCm/hip-fpsan](https://github.com/ROCm/hip-fpsan).
 
 ## The problem FPSan solves
 

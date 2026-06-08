@@ -1,45 +1,30 @@
 # fpsan — a stand-alone float32 toy
 
-> ## ⚠️ Read this first
->
-> **This is an AI-generated experiment, for educational purposes only.**
->
-> It is *not* an original contribution. It is a small toy that **studies an
-> existing tool**: the **FPSan** floating-point sanitizer developed in the
-> [Triton compiler](https://github.com/triton-lang/triton). **All of the ideas
-> studied here — the embedding into modular integers, the algebraic semantics,
-> the connection to Schanuel's conjecture — belong to the FPSan / Triton authors,
-> not to this repository.** We claim **no credit** for them.
->
-> The code here was written by an AI assistant (Claude) by reading and porting
-> the relevant parts of the Triton sources, so that one can toy with
-> FPSan-rewritten `float32` arithmetic in plain C++ without building Triton.
-> It may contain mistakes; trust the upstream sources, not this.
->
-> **Authoritative sources (please read these for the real thing):**
-> - Triton FPSan docs: [`docs/programming-guide/chapter-3/fpsan.rst`](https://github.com/triton-lang/triton/blob/main/docs/programming-guide/chapter-3/fpsan.rst)
-> - The conceptual blog post by one of the FPSan authors:
->   ["Schanuel's conjecture and the semantics of FPSan"](https://cp4space.hatsya.com/2026/05/03/schanuels-conjecture-and-the-semantics-of-fpsan/)
-> - The implementation this toy ports from:
->   [`FpSanToLLVM.cpp`](https://github.com/triton-lang/triton/blob/main/lib/Conversion/TritonInstrumentToLLVM/FpSanToLLVM.cpp)
->   (the `phi`/`phi⁻¹` bit-mixing) and
->   [`FpSanitizer.cpp`](https://github.com/triton-lang/triton/blob/main/lib/Dialect/TritonInstrument/Transforms/FpSanitizer.cpp)
->   (division / `exp` / `exp2`).
+A header-only C++ toy that reproduces the core of Triton's **FPSan**
+floating-point sanitizer in plain `float32`, so you can play with
+FPSan-rewritten arithmetic by hand without building Triton.
 
----
+FPSan isn't ours — it was invented by the [Triton
+project](https://github.com/triton-lang/triton), and the ideas studied here (the
+embedding into modular integers, the algebraic semantics, the link to Schanuel's
+conjecture) are the FPSan authors'. The math is explained in their blog post,
+["Schanuel's conjecture and the semantics of
+FPSan"](https://cp4space.hatsya.com/2026/05/03/schanuels-conjecture-and-the-semantics-of-fpsan/);
+see also the [Triton FPSan
+docs](https://github.com/triton-lang/triton/blob/main/docs/programming-guide/chapter-3/fpsan.rst).
+This repo ports their constants verbatim from
+[`FpSanToLLVM.cpp`](https://github.com/triton-lang/triton/blob/main/lib/Conversion/TritonInstrumentToLLVM/FpSanToLLVM.cpp)
+and
+[`FpSanitizer.cpp`](https://github.com/triton-lang/triton/blob/main/lib/Dialect/TritonInstrument/Transforms/FpSanitizer.cpp),
+for study rather than production.
 
-A header-only C++ re-implementation of the core ideas behind Triton's **FPSan**
-floating-point sanitizer, restricted to `float32`. This lets you toy with
-FPSan-rewritten programs by hand without running the Triton compiler.
+For a real, complete implementation — every GPU intrinsic, mixed precision, a
+full test suite — see **[ROCm/hip-fpsan](https://github.com/ROCm/hip-fpsan)**.
 
-> ### 📖 Best place to start: [**NARROW_FLOATS.md**](NARROW_FLOATS.md)
->
-> Want to actually *understand* how FPSan works, not just run it? Read
-> **[NARROW_FLOATS.md](NARROW_FLOATS.md)** — an illustrated walk-through that
-> applies the exact same recipe to **FP4** (only 16 values, so the entire
-> embedding fits in one table you can check by eye) and **FP8 E5M2** (a real
-> IEEE-style type with Inf/NaN). It computes the embedding `φ` by hand and
-> verifies every algebraic law. It is the most accessible explanation here.
+**Start here:** [understanding-fpsan.md](understanding-fpsan.md) derives the
+whole construction from first principles, one ingredient at a time;
+[narrow-floats.md](narrow-floats.md) works the same recipe by hand on 4- and
+8-bit floats, small enough to check every embedding table by eye.
 
 - `fpsan_f32.hpp` — the `FPSanF32` class and the embedding `phi`. **This is the
   primary code**: one concrete type, nothing to configure.
@@ -102,7 +87,7 @@ produces.
 
 ## The narrow-float study material
 
-The code behind [NARROW_FLOATS.md](NARROW_FLOATS.md). `fpsan_f32.hpp` stays the
+The code behind [narrow-floats.md](narrow-floats.md). `fpsan_f32.hpp` stays the
 primary code; these are supporting study files:
 
 - `fpsan_generic.hpp` — a small, run-time-parameterized companion (`FPFormat` +

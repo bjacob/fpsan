@@ -17,7 +17,7 @@
 // ----------------------------------------------------------------------------
 // Works out the FPSan integer payloads on narrow floating-point types, and
 // verifies the algebraic properties by exhaustive enumeration.  Every table in
-// NARROW_FLOATS.md is produced by this program, so the document stays honest.
+// narrow-floats.md is produced by this program, so the document stays honest.
 //
 // Build:   c++ -std=c++20 -O2 narrow_demo.cpp -o narrow_demo
 // Run:     ./narrow_demo

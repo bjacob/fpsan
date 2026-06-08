@@ -1,19 +1,12 @@
 # FPSan by hand: the integer payloads on narrow floats
 
-> ## ⚠️ Read this first
->
-> **This is an AI-generated educational document, for study purposes only.** It
-> works out, by hand, what Triton's **FPSan** floating-point sanitizer does on
-> very small float types. **All the ideas are the FPSan / Triton authors'**, not
-> ours — see the [README](README.md) for the disclaimer, the
-> [Triton FPSan docs](https://github.com/triton-lang/triton/blob/main/docs/programming-guide/chapter-3/fpsan.rst),
-> and the authors' blog post,
-> ["Schanuel's conjecture and the semantics of FPSan"](https://cp4space.hatsya.com/2026/05/03/schanuels-conjecture-and-the-semantics-of-fpsan/).
->
-> Every table below is produced and exhaustively verified by
-> [`narrow_demo.cpp`](narrow_demo.cpp) (built on [`fpsan_generic.hpp`](fpsan_generic.hpp)).
-> Rebuild it to regenerate everything:
-> `c++ -std=c++20 -O2 narrow_demo.cpp -o narrow_demo && ./narrow_demo`.
+FPSan is Triton's; this document just works its construction out by hand on very
+small float types. See the [README](README.md) for credits and links.
+
+Every table below is produced and exhaustively verified by
+[`narrow_demo.cpp`](narrow_demo.cpp) (built on
+[`fpsan_generic.hpp`](fpsan_generic.hpp)); rebuild it to regenerate everything:
+`c++ -std=c++20 -O2 narrow_demo.cpp -o narrow_demo && ./narrow_demo`.
 
 ## Why narrow floats
 
