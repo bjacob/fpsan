@@ -350,10 +350,10 @@ integer resize between them, no new algebra.
 
 ## Iteration 4: Transcendentals
 
-So far we have $+, -, \times, \div$. Real kernels also use `exp`, `log`,
-`sin`, `cos`, `sqrt`, `tanh`, etc. Unlike the four basic operations, these
-have no natural counterpart in integer arithmetic — we have to *define* how
-FPSan implements each one.
+So far we have $+, -, \times, \div$ and casts. There are also `exp`, `log`,
+`sin`, `cos`, `sqrt`, `tanh`, and the rest. Unlike the four basic operations,
+these have no natural counterpart in integer arithmetic — we have to *define*
+how FPSan implements each one.
 
 The defining property we want, for each transcendental, is **whatever
 algebraic identities the real function obeys, the FPSan version should
@@ -389,13 +389,26 @@ similar construction that satisfies the angle-addition formulas, by
 piggy-backing on `exp` via Euler's identity $e^{ix} = \cos x + i \sin x$
 and treating payloads as complex numbers built from pairs of integers.
 
-For others — `log`, `sqrt`, `erf`, `floor`, `ceil`, `tanh`, etc. — there are
-no useful algebraic identities to enforce. The obvious candidate,
-`log(a*b) = log a + log b`, would be redundant with
-`exp(a+b) = exp(a)*exp(b)` and would over-constrain the choice of `log`. So
-for these FPSan picks something even simpler: a **tagged scramble**. Each transcendental gets a
-hash-like permutation of the payload, tagged by the operation's identity, so
-that:
+For others — `log`, `sqrt`, `erf`, `floor`, `ceil`, `tanh`, etc. — the
+identities we'd *want* are out of reach, and it's worth being honest that this
+is a forced limitation rather than something FPSan has no use for. It would be
+genuinely useful to honor `log(x*y) = log x + log y`, or
+`sqrt(x*y) = sqrt x · sqrt y` — a refactor that applied either would then
+survive the rewrite. But neither is achievable in $\mathbb{Z}/2^w$:
+
+- A `log` obeying its law would be a homomorphism from *multiplication* to
+  *addition*, and the zero element forbids any nontrivial one:
+  `log(0·x) = log 0 = log 0 + log x` forces `log x = 0` for all `x`.
+- A `sqrt` that is both multiplicative *and* an actual square root
+  (`sqrt(x)² = x`) can't exist either: squaring mod $2^w$ is neither injective
+  nor onto, so most payloads have no square root at all.
+
+The asymmetry with `exp` is the point: *addition* has no such obstruction, so
+`g^p` works, but the reverse direction (product → sum) is blocked by zero and by
+multiplication not being invertible. So for these FPSan doesn't *choose* to skip
+the identities — it *can't* honor them, and settles for the weakest thing still
+worth having: a **tagged scramble**. Each such op gets a hash-like permutation
+of the payload, tagged by the operation's identity, so that:
 
 - `log(x) == log(x)` always — same input gives same output.
 - `log(x) != sqrt(x)` for any $x$ (with overwhelming probability) — different
@@ -406,47 +419,3 @@ compute anything you can use numerically, but they do let you detect "did
 this transcendental get called or not, and was it called on the same
 argument both times" — which is exactly the kind of question a refactor-vs-
 original comparison needs to answer.
-
-## Putting it together
-
-The full FPSan recipe, distilled:
-
-| Ingredient | Iteration | Purpose |
-|---|---|---|
-| Integer +, ×, − on payloads (unsigned, mod $2^{32}$) | 1 | Associativity, commutativity, distributivity |
-| Scrambling one-to-one encoding $\varphi$ with $\varphi(0)=0, \varphi(1)=1, \varphi(-x)=-\varphi(x)$ | 2 | Identities for $0$ and $1$, and negation |
-| Per-format $\varphi_w$ + casts as signed resize of the payload | 3 | Mixed-precision support |
-| `exp(p) = g^p`; `sin`/`cos` via Euler's identity; tagged-scramble for the rest | 4 | Transcendentals with the right identities |
-
-Concretely, an FPSan `Value` holds a single $w$-bit integer payload. Each
-of `+`, `−`, `×` is a single CPU/GPU instruction. Each transcendental is one
-modular exponentiation or one hash. Nothing depends on runtime state.
-
-What you give up:
-
-- **No constant folding**: `1 + 2 != 3` at payload level. If you want it,
-  do it before the comparison.
-- **No notion of magnitude or ordering**: payloads scramble, so `<` is
-  meaningless. (Comparison operators in an FPSan implementation either
-  compare the *decoded* floats, which breaks the algebraic guarantee, or
-  return a stable hash-of-the-payload boolean — there is no truly
-  satisfying answer here.)
-- **No NaN, Inf, denormal semantics**: the encoding treats those bit
-  patterns as just more payloads.
-- **No IEEE rounding**: every operation is exact integer arithmetic.
-
-What you get:
-
-- **Algebraically equivalent expressions are bit-equal at payload level.**
-  Reassociations, factorings, anything that's a consequence of the rules
-  of integer arithmetic, produces identical payloads.
-- **Distinct expressions almost never collide.** Two expressions that
-  aren't algebraically equivalent produce different payloads with
-  probability $1 - 1/2^w$, modulo the deliberate identities listed above.
-- **Zero runtime cost relative to native float**, give or take a few
-  cycles per op for the encoding/decoding.
-
-That is the whole construction. The Triton blog post linked above develops
-the same machinery from a more mathematical angle — Schanuel's conjecture
-and the algebraic-independence of transcendentals — and proves stronger
-statements about it. This document was the engineering tour.
