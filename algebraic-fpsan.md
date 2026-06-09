@@ -188,15 +188,22 @@ This is where $\varphi_p$ shines.
   payloads. The field is a clean win. Division by residue $0$ occurs iff
   dividing by a genuine $\pm 0.0$ → honest infinity (§7). (The composite CRT
   variant gives this up for a small zero-divisor rate — §8.)
-- **Casts / mixed precision:** all of `f16, bf16, f32, f64` embed in
-  $\mathbb{Z}[1/2]$ via the *same* $\varphi_p$. A value-preserving cast
-  (widening, or any exact narrowing) does not change the rational value, so it is
-  **literally the identity on residues.** Mixed precision is unified: a residue
-  doesn't know or care what width produced it. Contrast FPSan, which needs a
-  per-width $\varphi_w$ and models casts as a non-value-preserving signed resize
-  of the payload (see [understanding-fpsan.md](understanding-fpsan.md), iter. 3).
-  Only *lossy* narrowing rounds, which — like all rounding — this model
-  abstracts away (§9).
+- **Casts / mixed precision — and a real tension (corrected).** *If* a single
+  modulus $n$ is shared across all widths, a value-preserving cast doesn't change
+  the residue, so casts are **the identity** and mixed precision is unified. But
+  that needs $n$ large enough for the widest type ($n>2^{53}$ for `f64`) — a
+  payload as wide as the widest type, which is **incompatible with the compact,
+  per-width** encodings of §8 (each width $w$ has its own $n_w<2^w$). With
+  per-width moduli, casts are **not value-faithful**: widening `f16`$\to$`f32`
+  would need $\varphi_{n_{32}}(v)$, but the 16-bit residue carries only 16 bits
+  about $v$ and $\varphi_{n_{16}}$ is not injective, so $v$ can't be recovered (an
+  information barrier, not a cleverness gap). So a compact, footprint-faithful
+  sanitizer treats casts as a *defined, non-faithful* convention (Inf/NaN map
+  across, a finite residue reduces mod the destination $n$; identity at same
+  width) — exactly like FPSan's resize. The "casts are the identity" property is
+  real *only* in the one-modulus regime, which trades away compactness; §8 keeps
+  compactness and gives this up. (Only *lossy* narrowing additionally rounds,
+  which §9 abstracts away.)
 - **Subnormals:** also dyadic, handled by the same map with no special case
   (FPSan punts on them).
 
@@ -250,7 +257,13 @@ hence zero-divisors at rate $\sim 1/p+1/d$ (observed $19/300\mathrm{k}$), and an
 `exp` whose image is only the order-$d$ subgroup, so exp results collide at
 $\sim 1/d$ (observed: 300k inputs → only $\approx d$ distinct exp outputs).
 
-`sin`/`cos` get the analogous order-$d$ rotation (the Euler construction).
+`sin`/`cos` *would* get an analogous order-$d$ rotation (Re/Im of an order-$d$
+element of the circle group) — but only with a $p\equiv1\pmod4$ prime, where the
+circle group has order $p-1$ (so $d\mid p-1$ gives a genuine rotation). The
+Sophie-Germain $p=2d+1$ used for `exp` here has $p\equiv3\pmod4$: the circle has
+order $p+1$ and $d\nmid p+1$, so no order-$d$ rotation exists. So `sin`/`cos`
+stay **tagged tokens for now**; true angle-addition is open and needs both a
+$p\equiv1\pmod4$ choice and complex (i²=−1) arithmetic over $\mathbb{Z}/n$.
 `log`, `sqrt`, `erf`, … have no usable identity — a faithful `log` would be
 $\exp$'s inverse, the discrete logarithm, which is expensive and again not a
 function of the residue — so they stay **hash tokens**. And that is *correct*,
@@ -261,7 +274,8 @@ generator per call is the faithful model.
 | fragment | true-value structure | model here |
 |---|---|---|
 | algebraic ($+,-,\times,\div$) | richly related ($2{+}2=4$) | **value**: $\varphi_n$ residue |
-| $\exp$ (and $\sin,\cos$) | one relation: $\exp(a{+}b)=\exp(a)\exp(b)$ | **structured**: $g^{\,v\bmod d}$ (CRT only) |
+| $\exp$ | one relation: $\exp(a{+}b)=\exp(a)\exp(b)$ | **structured**: $g^{\,v\bmod d}$ (CRT only) |
+| $\sin,\cos$ | angle-addition | **open**: needs $p\equiv1\!\!\pmod4$ + complex $\mathbb{Z}/n$; tagged for now |
 | $\log,\sqrt,\dots$ | algebraically independent | **free**: hash token |
 
 ## 7. Zero, infinity, NaN, signs
@@ -333,7 +347,7 @@ are algebraically uglier and less value-faithful.
 Both share the **hybrid transcendental scheme**: carry $\varphi_n(\text{exact
 value})$ for $+,-,\times,\div$ and casts (exact, value-faithful,
 precision-agnostic, honest $0/\infty/\mathrm{NaN}$); at a transcendental call, either
-apply the structured map ($\exp$, and $\sin/\cos$, in the CRT variant) or mint a
+apply the structured map ($\exp$, in the CRT variant) or mint a
 fresh free generator $t=H(f,r_x)$ (`log`, `sqrt`, … — and *all* transcendentals
 in 1b). Faithful by §6.
 
@@ -380,7 +394,7 @@ consequences of abstracting rounding and magnitude away.
 | encoding is a ring homomorphism | no (free model) | **yes (value)** | **yes (value)** |
 | respects all rational-function identities | no (only axioms) | **yes** | **yes** |
 | $x/x=1$, division total | partial (odd only) | **yes (field)** | mostly (zero-div $\sim1/p{+}1/d\to\mathrm{NaN}$) |
-| mixed precision / casts | per-width $\varphi_w$, resize | **one map, exact casts = id** | **one map, exact casts = id** |
+| mixed precision / casts | per-width $\varphi_w$, resize | per-width $n_w$; non-faithful cast convention (§5) | per-width $n_w$; non-faithful cast convention (§5) |
 | subnormals | punted | **uniform** | **uniform** |
 | Inf / NaN | not modeled | **$\mathbb{P}^1$ + NaN, honest $0$** | **$\mathbb{P}^1$ + NaN, honest $0$** |
 | $\exp(a{+}b)=\exp(a)\exp(b)$ | yes ($g^{p}$) | no (hash token) | **yes ($g^{\,v\bmod d}$)** |
@@ -393,11 +407,14 @@ consequences of abstracting rounding and magnitude away.
 | per-op cost | free wraparound | mod-$p$ reduction | mod-$n$ reduction |
 
 **Bottom line.** On the *algebraic* fragment both variants are a strictly better
-foundation than FPSan — the honest value model, clean division and mixed
-precision, a principled Inf/NaN story — at the cost of mod-$n$ arithmetic and a
-few bits of collision margin (bought back by repeating with another prime).
+foundation than FPSan — the honest value model, clean division (a field),
+value-faithful arithmetic *within a width*, a principled Inf/NaN story — at the
+cost of mod-$n$ arithmetic and a few bits of collision margin (bought back by
+repeating with another prime). Casts *across* widths are a defined, non-faithful
+convention (§5), not the unified identity the one-modulus picture suggests.
 **Variant 1b** is the clean field: pick it when the exponential law isn't needed.
-**Variant CRT** adds the exact exp homomorphism (and $\sin/\cos$), paying with
-zero-divisors and a small exp image. The genuine remaining limitation, shared
-with FPSan and not fixable by any sign/exponent trick, is **order / `min` /
-`max`** — a finite field has no compatible order.
+**Variant CRT** adds the exact exp homomorphism, paying with zero-divisors and a
+small exp image ($\sin/\cos$ angle-addition would need a $p\equiv1\pmod 4$ prime
+choice rather than the Sophie-Germain $p=2d+1$ — §6, still open). The genuine
+remaining limitation, shared with FPSan and not fixable by any sign/exponent
+trick, is **order / `min` / `max`** — a finite field has no compatible order.
