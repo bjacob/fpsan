@@ -24,7 +24,7 @@ every property below is a consequence of it.
 ## 1. The map
 
 Finite binary floats are dyadic rationals: a finite `float32` is $m\cdot 2^{e}$
-with $m,e\in\mathbb{Z}$ and $|m| < 2^{24}$ (significand incl. implicit bit; sign
+with $m,e\in\mathbb{Z}$ and $\lvert m\rvert \lt 2^{24}$ (significand incl. implicit bit; sign
 folded into $m$), $e \in [-149, 104]$. They live in
 
 $$\mathbb{Z}[1/2] \;=\; \{\, a/2^k : a\in\mathbb{Z},\,k\ge 0 \,\} \;=\; \mathbb{Z}\big[\tfrac12\big],$$
@@ -39,9 +39,10 @@ $$\varphi_p : \mathbb{Z}[1/2] \longrightarrow \mathbb{F}_p, \qquad
 forced by $1\mapsto 1$ and $\tfrac12 \mapsto \overline{2}^{-1}$. It is a genuine
 homomorphism: it respects $+,-,\times$ on the nose.
 
-It is cleaner to name the largest domain. Let $\mathbb{Z}_{(p)} = \{a/b : p\nmid b\}$
-be the localization of $\mathbb{Z}$ at the prime $p$; it is a local ring with
-maximal ideal $p\mathbb{Z}_{(p)}$ and residue field $\mathbb{Z}_{(p)}/p\mathbb{Z}_{(p)} \cong \mathbb{F}_p$.
+It is cleaner to name the largest domain. Let $\mathbb{Z}_{(p)}$ be the
+localization of $\mathbb{Z}$ at the prime $p$ — the fractions $a/b$ with
+$p\nmid b$. It is a local ring with maximal ideal $p\mathbb{Z}_{(p)}$ and residue
+field $\mathbb{Z}_{(p)}/p\mathbb{Z}_{(p)} \cong \mathbb{F}_p$.
 Then
 
 $$\mathbb{Z}[1/2] \;\subset\; \mathbb{Z}_{(p)} \;\xrightarrow{\ \text{residue}\ }\; \mathbb{F}_p$$
@@ -60,7 +61,7 @@ in. That is strictly more than FPSan's free model honors.
 
 We restrict attention to **compact 32-bit encodings** throughout. Two variants
 are developed in §8: a single prime $p$ just below $2^{32}$, and a composite
-$n=pd$ (still $<2^{32}$) that buys an exact exponential. A working prototype of
+$n=pd$ (still $\lt 2^{32}$) that buys an exact exponential. A working prototype of
 both lives in [`algebraic_fpsan_generic.hpp`](algebraic_fpsan_generic.hpp) +
 [`algebraic_demo.cpp`](algebraic_demo.cpp).
 
@@ -97,12 +98,12 @@ the *transcendental* parts; and the interesting object is the hybrid (§8).
 
 ## 3. Injectivity and collisions
 
-We give up injectivity ($p < 2^{32}$). Three separate questions hide under
+We give up injectivity ($p \lt 2^{32}$). Three separate questions hide under
 "how bad are collisions."
 
 **(a) Collision with zero — the one that would hurt — does not happen.**
-$\varphi_n(m\cdot 2^e)=0 \iff n\mid m \iff m=0$, because $|m|<2^{24}$ and the
-modulus $n>2^{24}$ (both variants: $n\approx 2^{32}$ for 1b, $\approx 2^{31}$ for
+$\varphi_n(m\cdot 2^e)=0 \iff n\mid m \iff m=0$, because $\lvert m\rvert \lt 2^{24}$ and the
+modulus $n \gt 2^{24}$ (both variants: $n\approx 2^{32}$ for 1b, $\approx 2^{31}$ for
 CRT). So the *only* finite float with residue $0$ is $\pm 0.0$ — the crucial
 design constraint that keeps $0$ honest and the zero/infinity story (§7) clean.
 Nothing nonzero ever silently becomes zero. (This is about residue-$0$; the CRT
@@ -113,7 +114,7 @@ division-only issue.)
 mostly harmless.** With $N\approx 2^{32}$ finite floats dropped into $p\approx
 2^{32}$ residues, occupancy is Poisson($\approx 1$): a constant fraction of
 floats share their residue with another float. (The image
-$\{\bar m\,\bar 2^{\,e}\}$ is a union of $\sim 250$ scaled copies of the
+$\bar m\,\bar 2^{\,e}$ is a union of $\sim 250$ scaled copies of the
 significand interval — structured, but spread across $\mathbb{F}_p$.) This only
 matters for a *literal-substitution* bug: replacing input float $x$ by a
 different $y$ with $\varphi_p(x)=\varphi_p(y)$. For the main use case —
@@ -123,7 +124,7 @@ inputs** — both sides share the same leaves, so leaf collisions are irrelevant
 **(c) Circuit-level false matches are fingerprinting at a random prime.**
 Two algebraically *different* expressions on shared inputs collide iff
 $p \mid \operatorname{num}(v_A - v_B)$. The difference $v_A-v_B = N/2^k$ has
-$|N| \lesssim 2^{278}$ (significand $<2^{24}$, exponent span $\sim 254$), so $N$
+$\lvert N\rvert \lesssim 2^{278}$ (significand $\lt 2^{24}$, exponent span $\sim 254$), so $N$
 has at most $\sim 278/32 \approx 9$ prime factors above $2^{32}$. With $\sim
 2^{26.5}$ primes in $[2^{31},2^{32}]$, a **random** such prime divides $N$ with
 probability $\lesssim 9/2^{26.5} \approx 2^{-23.5}$.
@@ -156,8 +157,8 @@ by repeating with another prime.
 FPSan scrambles to make leaves free. Can we keep $\varphi_p$'s homomorphism
 *and* re-introduce scrambling on top, $v \mapsto \sigma(\varphi_p(v))$? Only if
 $\sigma$ is a ring automorphism of $\mathbb{F}_p$ — otherwise the homomorphism
-(the entire point) is destroyed. But $\operatorname{Aut}(\mathbb{F}_p)=\{\mathrm{id}\}$
-(the Frobenius $x\mapsto x^p$ is the identity on the prime field). **So you
+(the entire point) is destroyed. But $\operatorname{Aut}(\mathbb{F}_p)$ is
+trivial (the Frobenius $x\mapsto x^p$ is the identity on the prime field). **So you
 cannot scramble inside $\mathbb{F}_p$ at all.** Homomorphism and value-scrambling
 are mutually exclusive; this is not a tunable trade-off but a dichotomy.
 
@@ -307,7 +308,7 @@ always, no zero-divisors; cleanest algebra and best collision margin
 tokens.
 
 **Variant CRT — composite $n=pd$.** $p,d$ distinct odd primes, $p\equiv1\pmod d$,
-$n<2^{32}$ (prototype: a Sophie-Germain pair near $2^{15}$, $n\approx2^{31}$).
+$n \lt 2^{32}$ (prototype: a Sophie-Germain pair near $2^{15}$, $n\approx2^{31}$).
 $\mathbb{Z}/n\cong\mathbb{F}_p\times\mathbb{F}_d$ — a product of fields, *not* a
 field. Buys the **exact exp homomorphism** $\exp(v)=g^{\,v\bmod d}$ (§6). Costs:
 
@@ -331,7 +332,7 @@ are algebraically uglier and less value-faithful.
 
 Both share the **hybrid transcendental scheme**: carry $\varphi_n(\text{exact
 value})$ for $+,-,\times,\div$ and casts (exact, value-faithful,
-precision-agnostic, honest $0/\infty/$NaN); at a transcendental call, either
+precision-agnostic, honest $0/\infty/\mathrm{NaN}$); at a transcendental call, either
 apply the structured map ($\exp$, and $\sin/\cos$, in the CRT variant) or mint a
 fresh free generator $t=H(f,r_x)$ (`log`, `sqrt`, … — and *all* transcendentals
 in 1b). Faithful by §6.
@@ -378,10 +379,10 @@ consequences of abstracting rounding and magnitude away.
 |---|---|---|---|
 | encoding is a ring homomorphism | no (free model) | **yes (value)** | **yes (value)** |
 | respects all rational-function identities | no (only axioms) | **yes** | **yes** |
-| $x/x=1$, division total | partial (odd only) | **yes (field)** | mostly (zero-div $\sim1/p{+}1/d\to$NaN) |
+| $x/x=1$, division total | partial (odd only) | **yes (field)** | mostly (zero-div $\sim1/p{+}1/d\to\mathrm{NaN}$) |
 | mixed precision / casts | per-width $\varphi_w$, resize | **one map, exact casts = id** | **one map, exact casts = id** |
 | subnormals | punted | **uniform** | **uniform** |
-| Inf / NaN | not modeled | **$\mathbb{P}^1\sqcup\{$NaN$\}$, honest $0$** | **$\mathbb{P}^1\sqcup\{$NaN$\}$, honest $0$** |
+| Inf / NaN | not modeled | **$\mathbb{P}^1$ + NaN, honest $0$** | **$\mathbb{P}^1$ + NaN, honest $0$** |
 | $\exp(a{+}b)=\exp(a)\exp(b)$ | yes ($g^{p}$) | no (hash token) | **yes ($g^{\,v\bmod d}$)** |
 | other transcendentals | tagged scramble (free) | hash token (free) | hash token (free) |
 | order / `abs` / `min` / `max` | faked (payload-order, infaithful) | out of scope | out of scope |
